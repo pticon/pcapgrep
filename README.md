@@ -1,12 +1,16 @@
 pcapgrep
 ========
 
-grep like in aor multiple pcap files.
+grep like in multiple pcap files.
 
 Usage
 -----
 ```
-usage: ./pcapgrep <pattern> <pcap1 ... pcapN>
+usage: pcapgrep [options] <pattern> <pcap1 ... pcapN>
+options:
+        -h           : display this and exit
+        -v           : display version number and exit
+        -e <pattern> : use <pattern> as the pattern (can be used multiple times)
 ```
 
 License

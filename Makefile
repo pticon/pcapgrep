@@ -28,6 +28,7 @@ endif
 
 
 SRCS:=main.c
+SRCS+=grep.c
 
 
 OBJS:=$(SRCS:%.c=%.o)

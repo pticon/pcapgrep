@@ -5,75 +5,136 @@
 #include <pcap/pcap.h>
 
 
-char errbuff[PCAP_ERRBUF_SIZE];
+#include "grep.h"
 
 
-typedef struct grep
+#define PROGNAME	"pcapgrep"
+#define VERSION		"1.1-dev"
+
+
+struct pcapgrep
 {
-	const char	*pattern;
-	char		*filename;
-	unsigned	count;
-} grep_t;
+	struct grep	*grep;
+	const char	*filename;
+	unsigned	pkt;
+};
 
 
-static void usage(const char * progname)
+static void usage(void)
 {
-	fprintf(stderr, "usage: %s <pattern> <pcap1 ... pcapN>\n", progname);
+	fprintf(stderr, "usage: %s [options] <pattern> <pcap1 ... pcapN>\n", PROGNAME);
+	fprintf(stderr, "options:\n");
+	fprintf(stderr, "\t-h           : display this and exit\n");
+	fprintf(stderr, "\t-v           : display version number and exit\n");
+	fprintf(stderr, "\t-e <pattern> : use <pattern> as the pattern (can be used multiple times)\n");
+}
+
+
+static void version(void)
+{
+	fprintf(stderr, "%s version %s\n", PROGNAME, VERSION);
 }
 
 
 static void pcap_callback(u_char * user, const struct pcap_pkthdr * hdr, const u_char * bytes)
 {
-	grep_t	* grep = (grep_t *) user;
+	struct pcapgrep	*pcapgrep = (struct pcapgrep *) user;
+	const char	*match;
 
-	grep->count++;
+	pcapgrep->pkt++;
 
-	if ( memmem(bytes, hdr->caplen, grep->pattern, strlen(grep->pattern)) != NULL )
+	if ( (match = grep_match(pcapgrep->grep, bytes, hdr->caplen)) )
 	{
-		printf("%s (pkt %u): found %s\n", grep->filename, grep->count, grep->pattern);
+		printf("%s (pkt %u): found %s\n", pcapgrep->filename, pcapgrep->pkt,
+			match);
 	}
 }
 
 
 int main(int argc, char * argv[])
 {
-	int		i;
+	int		ret = 0,
+			i,
+			c;
 	pcap_t		*pcap;
-	grep_t		grep;
-	const char	*pattern;
+	struct pcapgrep	pcapgrep;
+	int		has;
+	char		errbuff[PCAP_ERRBUF_SIZE];
 
-	if ( argc < 3 )
+	if ( (pcapgrep.grep = grep_new()) == NULL )
 	{
-		usage(argv[0]);
+		fprintf(stderr, "Internal error\n");
 		return -1;
 	}
 
-	pattern = argv[1];
+	while ( (c = getopt(argc, argv, "hve:")) != -1 )
+	{
+		switch ( c )
+		{
+			case 'h':
+			usage();
+			goto error;
+
+			case 'v':
+			version();
+			goto error;
+
+			case 'e':
+			if ( grep_add_pattern(pcapgrep.grep, optarg) )
+			{
+				fprintf(stderr, "Internal error\n");
+				ret = -1;
+				goto error;
+			}
+			break;
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+
+	if ( ((has = grep_has_pattern(pcapgrep.grep)) && argc < 1) ||
+		(!has && argc < 2) )
+	{
+		usage();
+		ret = -1;
+		goto error;
+	}
+
+	if ( argc > 1 && grep_add_pattern(pcapgrep.grep, argv[0]) )
+	{
+		fprintf(stderr, "Internal error\n");
+		ret = -1;
+		goto error;
+	}
 
 	/* Iterate over the files
 	 */
-	for ( i = 2 ; i < argc ; i++ )
+	for ( i = argc > 1 ? 1 : 0 ; i < argc ; i++ )
 	{
-		grep.pattern = pattern;
-		grep.filename = argv[i];
-		grep.count = 0;
+		pcapgrep.filename = argv[i];
+		pcapgrep.pkt = 0;
 
-		/* Open it
+		/* Open the pcap file
 		 */
-		if ( (pcap = pcap_open_offline(grep.filename, errbuff)) == NULL )
+		if ( (pcap = pcap_open_offline(pcapgrep.filename, errbuff)) == NULL )
 		{
-			fprintf(stderr, "Skip %s: %s\n", grep.filename, errbuff);
+			fprintf(stderr, "Skip %s: %s\n", pcapgrep.filename, errbuff);
+			ret = -1;
 			continue;
 		}
 
 		/* Iterate over the packets
 		 */
-		pcap_loop(pcap, 0, pcap_callback, (u_char *)  &grep);
+		pcap_loop(pcap, 0, pcap_callback, (u_char *)  &pcapgrep);
 
 		/* Close it
 		 */
 		pcap_close(pcap);
 	}
 
-	return 0;
+error:
+	grep_delete(pcapgrep.grep);
+
+	return ret;
 }
